@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Overhead — 4380 Fruitville Rd</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Space+Mono:wght@400;700&display=swap');
+
+  :root{
+    --sky-top:#1b2340;
+    --sky-bot:#3a2a3d;
+    --coral:#ff8a5c;
+    --amber:#ffb347;
+    --scope-line: rgba(255,179,71,0.35);
+    --scope-line-dim: rgba(255,179,71,0.14);
+    --ink:#f4ede2;
+    --ink-dim:#b9b0c8;
+    --panel: rgba(12,14,28,0.55);
+    --good:#8fe3a0;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{
+    background:
+      radial-gradient(ellipse at 50% -10%, #4a3350 0%, transparent 60%),
+      linear-gradient(180deg, var(--sky-top) 0%, var(--sky-bot) 100%);
+    color:var(--ink);
+    font-family:'Space Mono', monospace;
+    min-height:100vh;
+    padding:28px 18px 60px;
+  }
+  .wrap{max-width:1040px;margin:0 auto;}
+
+  header{
+    display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between;
+    gap:16px; margin-bottom:22px; border-bottom:1px solid rgba(255,179,71,0.25); padding-bottom:18px;
+  }
+  .eyebrow{
+    font-size:11px; letter-spacing:0.22em; text-transform:uppercase; color:var(--coral); margin:0 0 6px;
+  }
+  h1{
+    font-family:'Fraunces', serif; font-weight:600; font-size:clamp(28px,4vw,42px);
+    margin:0; line-height:1.05; color:var(--ink);
+  }
+  h1 span{color:var(--amber); font-style:italic; font-weight:400;}
+  .addr{font-size:12.5px; color:var(--ink-dim); margin-top:8px;}
+  .status{
+    text-align:right; font-size:12px; color:var(--ink-dim); min-width:180px;
+  }
+  .status .dot{
+    display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px;
+    background:var(--good); box-shadow:0 0 8px var(--good);
+  }
+  .status .dot.err{ background:#ff6b6b; box-shadow:0 0 8px #ff6b6b; }
+
+  .layout{display:grid; grid-template-columns: 340px 1fr; gap:24px;}
+  @media (max-width:820px){ .layout{grid-template-columns:1fr;} }
+
+  .scope-panel{
+    background:var(--panel); border:1px solid rgba(255,179,71,0.2); border-radius:16px;
+    padding:18px; backdrop-filter: blur(6px);
+  }
+  .scope-title{font-size:11px; letter-spacing:0.15em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:10px;}
+  canvas{width:100%; display:block; border-radius:12px;}
+  .radius-note{font-size:11px; color:var(--ink-dim); margin-top:10px; line-height:1.5;}
+  .radius-note b{color:var(--amber);}
+
+  .table-panel{
+    background:var(--panel); border:1px solid rgba(255,179,71,0.2); border-radius:16px;
+    padding:18px; backdrop-filter: blur(6px); overflow:hidden;
+  }
+  .table-title{font-size:11px; letter-spacing:0.15em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:12px;
+    display:flex; justify-content:space-between; align-items:center;}
+  .count-pill{
+    background:rgba(255,179,71,0.15); color:var(--amber); border-radius:999px; padding:2px 10px; font-size:11px;
+  }
+  table{width:100%; border-collapse:collapse; font-size:12.5px;}
+  th{
+    text-align:left; font-weight:400; color:var(--ink-dim); text-transform:uppercase; font-size:10.5px;
+    letter-spacing:0.08em; padding:6px 8px; border-bottom:1px solid rgba(255,179,71,0.25);
+  }
+  td{padding:9px 8px; border-bottom:1px solid rgba(255,255,255,0.06);}
+  tr.closest td{ background:rgba(143,227,160,0.08); }
+  tr.closest td:first-child{ box-shadow: inset 3px 0 0 var(--good); }
+  .callsign{font-weight:700; color:var(--ink); letter-spacing:0.03em;}
+  .airline{color:var(--amber); font-size:11.5px;}
+  .empty-row td{ text-align:center; color:var(--ink-dim); padding:32px 8px; font-size:12.5px; }
+  .empty-row .big{ font-family:'Fraunces', serif; font-style:italic; font-size:16px; color:var(--ink); display:block; margin-bottom:6px;}
+
+  footer{
+    margin-top:22px; font-size:11px; color:var(--ink-dim); line-height:1.6; text-align:center;
+  }
+  footer a{color:var(--amber);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <p class="eyebrow">Overhead Watch</p>
+      <h1>What's flying over <span>Fruitville Road</span></h1>
+      <p class="addr">4380 Fruitville Rd, Sarasota, FL 34232 — live feed, updates every 20s</p>
+    </div>
+    <div class="status" id="status">
+      <span class="dot" id="statusDot"></span><span id="statusText">connecting…</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <div class="scope-panel">
+      <div class="scope-title">Radar scope · 15mi radius</div>
+      <canvas id="scope" width="300" height="300"></canvas>
+      <p class="radius-note">
+        Position is plotted by live bearing and distance from the address.
+        <b>N</b> is up. Aircraft inside the inner ring are within ~2 miles — roughly overhead.
+      </p>
+    </div>
+
+    <div class="table-panel">
+      <div class="table-title">
+        <span>Tracked aircraft</span>
+        <span class="count-pill" id="countPill">0 in range</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Flight</th>
+            <th>Carrier</th>
+            <th>Alt (ft)</th>
+            <th>Speed (mph)</th>
+            <th>Hdg</th>
+            <th>Dist (mi)</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr class="empty-row"><td colspan="6"><span class="big">Listening for traffic…</span>First read from OpenSky is on its way.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>
+    Data via the free adsb.fi / adsb.lol community ADS-B networks — coverage depends on nearby volunteer receivers and can lag
+    a few seconds behind real time, and not every aircraft broadcasts a callsign. Carrier names are guessed from the ICAO callsign prefix (e.g. DAL → Delta).<br>
+    Built for 4380 Fruitville Rd, Sarasota FL. This page runs entirely in your browser — nothing is stored server-side.
+  </footer>
+
+</div>
+
+<script>
+// ---- Location: 4380 Fruitville Rd, Sarasota, FL 34232 (approximate) ----
+const CENTER_LAT = 27.3346;
+const CENTER_LON = -82.4900;
+const RADIUS_MI = 15;
+
+// bounding box in degrees (approx, good enough at this latitude)
+const latDelta = RADIUS_MI / 69.0;
+const lonDelta = RADIUS_MI / (69.0 * Math.cos(CENTER_LAT * Math.PI/180));
+const BBOX = {
+  lamin: CENTER_LAT - latDelta,
+  lamax: CENTER_LAT + latDelta,
+  lomin: CENTER_LON - lonDelta,
+  lomax: CENTER_LON + lonDelta
+};
+
+// A working set of ICAO airline callsign prefixes -> carrier name
+// (Focused on US / SRQ-relevant carriers, with broader coverage as fallback)
+const AIRLINES = {
+  DAL:"Delta Air Lines", AAL:"American Airlines", UAL:"United Airlines", SWA:"Southwest Airlines",
+  JBU:"JetBlue Airways", FFT:"Frontier Airlines", NKS:"Spirit Airlines", AAY:"Allegiant Air",
+  SCX:"Sun Country Airlines", ASA:"Alaska Airlines", ENY:"Envoy Air", SKW:"SkyWest",
+  RPA:"Republic Airways", EDV:"Endeavor Air", ASH:"Mesa Airlines", PDT:"Piedmont Airlines",
+  GJS:"GoJet Airlines", QXE:"Horizon Air", FDX:"FedEx Express", UPS:"UPS Airlines",
+  ABX:"ABX Air", GTI:"Atlas Air", CSQ:"Cargo Air", ACA:"Air Canada", WJA:"WestJet",
+  BAW:"British Airways", VIR:"Virgin Atlantic", AFR:"Air France", DLH:"Lufthansa",
+  KLM:"KLM Royal Dutch", IBE:"Iberia", CMP:"Copa Airlines", AVA:"Avianca", VOI:"Volaris",
+  AMX:"Aeromexico", NKS:"Spirit Airlines", GLO:"GOL Linhas Aereas", TAM:"LATAM Airlines",
+  EJA:"NetJets", XOJ:"XOJET", LXJ:"Flexjet", JIA:"PSA Airlines", FLX:"Flexjet",
+  EJM:"Executive Jet Management", GAJ:"GlobalX", SAS:"SAS Scandinavian", TSC:"Air Transat",
+  CJT:"Cargojet", ATN:"Air Transport International", CKS:"Kalitta Air"
+};
+
+function guessCarrier(callsign){
+  if(!callsign) return null;
+  const cs = callsign.trim();
+  const prefix = cs.slice(0,3).toUpperCase();
+  if(AIRLINES[prefix]) return { name: AIRLINES[prefix], code: prefix, flightNo: cs.slice(3).trim() };
+  // General aviation / private (US registrations start with N)
+  if(/^N[0-9]/.test(cs)) return { name: "Private / GA (N-number)", code: null, flightNo: cs };
+  return { name: `Unlisted carrier (${prefix})`, code: prefix, flightNo: cs.slice(3).trim() };
+}
+
+function haversineMiles(lat1, lon1, lat2, lon2){
+  const R = 3958.8;
+  const toRad = d => d * Math.PI/180;
+  const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+function bearingDeg(lat1, lon1, lat2, lon2){
+  const toRad = d => d * Math.PI/180, toDeg = r => r * 180/Math.PI;
+  const y = Math.sin(toRad(lon2-lon1)) * Math.cos(toRad(lat2));
+  const x = Math.cos(toRad(lat1))*Math.sin(toRad(lat2)) - Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(toRad(lon2-lon1));
+  return (toDeg(Math.atan2(y,x)) + 360) % 360;
+}
+
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const tbody = document.getElementById('tbody');
+const countPill = document.getElementById('countPill');
+const canvas = document.getElementById('scope');
+const ctx = canvas.getContext('2d');
+
+let sweepAngle = 0;
+let currentPlanes = [];
+
+function drawScope(){
+  const w = canvas.width, h = canvas.height;
+  const cx = w/2, cy = h/2, R = w/2 - 14;
+  ctx.clearRect(0,0,w,h);
+
+  // rings
+  ctx.strokeStyle = 'rgba(255,179,71,0.35)';
+  ctx.lineWidth = 1;
+  [1,2,3].forEach(i=>{
+    ctx.beginPath();
+    ctx.arc(cx,cy, R*i/3, 0, Math.PI*2);
+    ctx.strokeStyle = i===1 ? 'rgba(143,227,160,0.5)' : 'rgba(255,179,71,0.25)';
+    ctx.stroke();
+  });
+  // crosshair
+  ctx.strokeStyle = 'rgba(255,179,71,0.18)';
+  ctx.beginPath(); ctx.moveTo(cx-R,cy); ctx.lineTo(cx+R,cy);
+  ctx.moveTo(cx,cy-R); ctx.lineTo(cx,cy+R); ctx.stroke();
+
+  // N/E/S/W labels
+  ctx.fillStyle = 'rgba(244,237,226,0.55)';
+  ctx.font = '10px Space Mono';
+  ctx.textAlign = 'center';
+  ctx.fillText('N', cx, cy-R-4);
+  ctx.fillText('S', cx, cy+R+12);
+  ctx.fillText('E', cx+R+8, cy+4);
+  ctx.fillText('W', cx-R-8, cy+4);
+
+  // center marker (the address)
+  ctx.fillStyle = '#ff8a5c';
+  ctx.beginPath(); ctx.arc(cx,cy,4,0,Math.PI*2); ctx.fill();
+
+  // sweep
+  const sweepRad = sweepAngle * Math.PI/180;
+  const grad = ctx.createConicGradient ? null : null;
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.rotate(sweepRad);
+  const sweepGrad = ctx.createLinearGradient(0,0,R,0);
+  sweepGrad.addColorStop(0,'rgba(255,179,71,0.45)');
+  sweepGrad.addColorStop(1,'rgba(255,179,71,0)');
+  ctx.strokeStyle = sweepGrad;
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(R,0); ctx.stroke();
+  ctx.restore();
+
+  // planes
+  currentPlanes.forEach(p=>{
+    const dist = Math.min(p.dist, RADIUS_MI);
+    const r = (dist / RADIUS_MI) * R;
+    const angleRad = (p.bearing - 90) * Math.PI/180; // bearing 0=N -> rotate so N is up
+    const px = cx + r * Math.cos(angleRad);
+    const py = cy + r * Math.sin(angleRad);
+    ctx.fillStyle = p.dist <= 2 ? '#8fe3a0' : '#ffb347';
+    ctx.beginPath(); ctx.arc(px,py,4,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth=1; ctx.stroke();
+    ctx.fillStyle = 'rgba(244,237,226,0.85)';
+    ctx.font = '9px Space Mono';
+    ctx.textAlign = 'left';
+    ctx.fillText(p.label, px+6, py+3);
+  });
+}
+
+function animateSweep(){
+  sweepAngle = (sweepAngle + 1.2) % 360;
+  drawScope();
+  requestAnimationFrame(animateSweep);
+}
+requestAnimationFrame(animateSweep);
+
+// Radius in nautical miles for the NM-based APIs below
+const RADIUS_NM = RADIUS_MI / 1.15078;
+
+// Two independent, key-free, CORS-friendly ADS-B sources, tried in order.
+// Both return ADSBExchange-compatible JSON: { ac: [ {hex, flight, alt_baro, gs, track, lat, lon, ...} ] }
+const SOURCES = [
+  { name:'adsb.fi',  url:`https://opendata.adsb.fi/api/v2/lat/${CENTER_LAT}/lon/${CENTER_LON}/dist/${RADIUS_NM.toFixed(1)}` },
+  { name:'adsb.lol', url:`https://api.adsb.lol/v2/point/${CENTER_LAT}/${CENTER_LON}/${RADIUS_NM.toFixed(1)}` }
+];
+
+let failCount = 0;
+const inIframe = (() => { try { return window.top !== window.self; } catch(e) { return true; } })();
+
+function normalize(ac){
+  const flight = (ac.flight || '').trim();
+  const dist = haversineMiles(CENTER_LAT, CENTER_LON, ac.lat, ac.lon);
+  const bearing = bearingDeg(CENTER_LAT, CENTER_LON, ac.lat, ac.lon);
+  const carrier = guessCarrier(flight || ac.r || '');
+  const altFt = (typeof ac.alt_baro === 'number') ? Math.round(ac.alt_baro)
+               : (typeof ac.alt_geom === 'number') ? Math.round(ac.alt_geom) : null;
+  const speedMph = (typeof ac.gs === 'number') ? Math.round(ac.gs * 1.15078) : null;
+  const heading = (typeof ac.track === 'number') ? Math.round(ac.track) : null;
+  return {
+    icao24: ac.hex, callsign: flight || ac.r || '—',
+    carrierName: carrier ? carrier.name : 'Unknown',
+    altFt, speedMph, heading, dist, bearing,
+    label: flight || ac.hex
+  };
+}
+
+async function tryFetch(source){
+  const res = await fetch(source.url);
+  if(!res.ok) throw new Error(`${source.name} HTTP ${res.status}`);
+  const data = await res.json();
+  const list = data.ac || [];
+  return list
+    .filter(ac => typeof ac.lat === 'number' && typeof ac.lon === 'number' && ac.alt_baro !== 'ground')
+    .map(normalize)
+    .filter(p => p.dist <= RADIUS_MI)
+    .sort((a,b) => a.dist - b.dist);
+}
+
+async function fetchTraffic(){
+  for(const source of SOURCES){
+    try{
+      const planes = await tryFetch(source);
+      currentPlanes = planes;
+      renderTable(planes);
+      setStatus(true, `live via ${source.name} · ${planes.length} aircraft in range`);
+      failCount = 0;
+      return;
+    }catch(err){
+      console.error(err);
+    }
+  }
+  // every source failed
+  failCount++;
+  if(failCount >= 2){
+    setStatus(false, 'feed unreachable');
+    const sandboxNote = inIframe
+      ? `This page looks like it's loading inside another app's preview panel, which can block
+         outside network calls. Open it directly in a full browser tab and try again.<br><br>`
+      : '';
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="6">
+      <span class="big">Can't reach a live flight feed right now</span>
+      ${sandboxNote}Both adsb.fi and adsb.lol failed to respond — this is usually a temporary
+      rate limit or an outage on their end, not a problem with this page. It will keep retrying
+      every 20 seconds automatically.
+    </td></tr>`;
+  } else {
+    setStatus(false, 'feed unavailable — retrying');
+  }
+}
+
+function setStatus(ok, text){
+  statusDot.classList.toggle('err', !ok);
+  statusText.textContent = text + ' · ' + new Date().toLocaleTimeString();
+}
+
+function renderTable(planes){
+  countPill.textContent = `${planes.length} in range`;
+  if(planes.length === 0){
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="6"><span class="big">Clear skies right now</span>No aircraft within ${RADIUS_MI} miles reporting position. Checking again shortly.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = planes.map(p => `
+    <tr class="${p.dist <= 2 ? 'closest' : ''}">
+      <td><span class="callsign">${p.callsign}</span></td>
+      <td><span class="airline">${p.carrierName}</span></td>
+      <td>${p.altFt != null ? p.altFt.toLocaleString() : '—'}</td>
+      <td>${p.speedMph != null ? p.speedMph : '—'}</td>
+      <td>${p.heading != null ? p.heading + '°' : '—'}</td>
+      <td>${p.dist.toFixed(1)}</td>
+    </tr>
+  `).join('');
+}
+
+fetchTraffic();
+setInterval(fetchTraffic, 20000);
+</script>
+</body>
+</html>
