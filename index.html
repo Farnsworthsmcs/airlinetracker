@@ -199,21 +199,23 @@
       </tbody>
     </table>
     <p class="log-note">
-      Logged whenever an aircraft comes within 1 mile of the address. Saved in this browser's local
-      storage, so it's specific to this device and this browser — it won't show up on your phone or another
-      computer. Cross-device history is on the roadmap once this moves behind a Cloudflare Worker.
+      Logged whenever an aircraft comes within 1 mile of the address. Stored in Cloudflare KV via
+      the tracker's own Worker, so the same log shows up on your phone, iPad, and PC.
     </p>
   </div>
 
   <footer>
-    Data via the free adsb.fi / adsb.lol community ADS-B networks — coverage depends on nearby volunteer receivers and can lag
+    Data via the free adsb.fi / adsb.lol community ADS-B networks, proxied through a Cloudflare Worker — coverage depends on nearby volunteer receivers and can lag
     a few seconds behind real time, and not every aircraft broadcasts a callsign. Carrier names are guessed from the ICAO callsign prefix (e.g. DAL → Delta).<br>
-    Built for 4380 Fruitville Rd, Sarasota FL. This page runs entirely in your browser — nothing is stored server-side.
+    Built for 4380 Fruitville Rd, Sarasota FL. The overhead sighting log is stored in Cloudflare KV.
   </footer>
 
 </div>
 
 <script>
+// ---- Your Cloudflare Worker (proxies ADS-B APIs + stores the shared sighting log) ----
+const WORKER_URL = 'https://overhead-proxy.rfarnsworth.workers.dev';
+
 // ---- Location: 4380 Fruitville Rd, Sarasota, FL 34232 (approximate) ----
 const CENTER_LAT = 27.3346;
 const CENTER_LON = -82.4900;
@@ -281,19 +283,44 @@ const overheadBannerText = document.getElementById('overheadBannerText');
 const logTbody = document.getElementById('logTbody');
 const clearLogBtn = document.getElementById('clearLogBtn');
 
-const LOG_KEY = 'overhead-sighting-log';
-function loadLog(){
-  try{ return JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); }catch(e){ return []; }
-}
-function saveLog(log){
-  try{ localStorage.setItem(LOG_KEY, JSON.stringify(log.slice(0, 300))); }catch(e){ console.error(e); }
-}
-let sightingLog = loadLog();
+let sightingLog = [];
 let prevOverheadIcaos = new Set();
+
+async function loadLog(){
+  try{
+    const res = await fetch(`${WORKER_URL}/api/log`);
+    if(!res.ok) throw new Error(`log HTTP ${res.status}`);
+    sightingLog = await res.json();
+  }catch(e){
+    console.error('log load failed', e);
+  }
+  renderLog();
+}
+
+async function postSighting(entry){
+  try{
+    await fetch(`${WORKER_URL}/api/log`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry)
+    });
+  }catch(e){
+    console.error('log post failed', e);
+  }
+}
+
+async function clearLog(){
+  try{
+    await fetch(`${WORKER_URL}/api/log`, { method: 'DELETE' });
+  }catch(e){
+    console.error('log clear failed', e);
+  }
+  await loadLog();
+}
 
 function renderLog(){
   if(sightingLog.length === 0){
-    logTbody.innerHTML = `<tr class="empty-row"><td colspan="5">No overhead passes logged yet on this device.</td></tr>`;
+    logTbody.innerHTML = `<tr class="empty-row"><td colspan="5">No overhead passes logged yet.</td></tr>`;
     return;
   }
   logTbody.innerHTML = sightingLog.slice(0, 50).map(entry => `
@@ -306,31 +333,25 @@ function renderLog(){
     </tr>
   `).join('');
 }
-renderLog();
+loadLog();
 
-clearLogBtn.addEventListener('click', () => {
-  sightingLog = [];
-  saveLog(sightingLog);
-  renderLog();
-});
+clearLogBtn.addEventListener('click', clearLog);
 
-function updateOverheadState(planes){
+async function updateOverheadState(planes){
   const overheadNow = planes.filter(p => p.dist <= OVERHEAD_MI);
   const nowIcaos = new Set(overheadNow.map(p => p.icao24));
 
   // Log a new entry only when a plane newly enters the overhead radius,
   // not on every 20s poll while it happens to still be there.
-  overheadNow.forEach(p => {
-    if(!prevOverheadIcaos.has(p.icao24)){
-      sightingLog.unshift({
-        time: Date.now(), callsign: p.callsign, carrierName: p.carrierName,
-        altFt: p.altFt, dist: p.dist
-      });
-    }
-  });
-  if(overheadNow.some(p => !prevOverheadIcaos.has(p.icao24))){
-    saveLog(sightingLog);
-    renderLog();
+  const newlyOverhead = overheadNow.filter(p => !prevOverheadIcaos.has(p.icao24));
+  for(const p of newlyOverhead){
+    await postSighting({
+      callsign: p.callsign, carrierName: p.carrierName,
+      altFt: p.altFt, dist: p.dist
+    });
+  }
+  if(newlyOverhead.length > 0){
+    await loadLog();
   }
   prevOverheadIcaos = nowIcaos;
 
@@ -459,9 +480,8 @@ function normalize(ac){
 
 async function tryFetch(source){
   // Neither adsb.fi nor adsb.lol send Access-Control-Allow-Origin, so a direct
-  // browser fetch is blocked by CORS even though the API itself works fine.
-  // Route through a public CORS relay that adds the missing header.
-  const proxied = `https://api.allorigins.win/raw?url=${encodeURIComponent(source.url)}`;
+  // browser fetch is blocked by CORS. Route through our own Worker, which adds it.
+  const proxied = `${WORKER_URL}/api/adsb?url=${encodeURIComponent(source.url)}`;
   const res = await fetch(proxied);
   if(!res.ok) throw new Error(`${source.name} HTTP ${res.status}`);
   const data = await res.json();
@@ -479,7 +499,7 @@ async function fetchTraffic(){
       const planes = await tryFetch(source);
       currentPlanes = planes;
       renderTable(planes);
-      updateOverheadState(planes);
+      await updateOverheadState(planes);
       setStatus(true, `live via ${source.name} · ${planes.length} aircraft in range`);
       failCount = 0;
       return;
