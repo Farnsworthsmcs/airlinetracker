@@ -317,7 +317,11 @@ function normalize(ac){
 }
 
 async function tryFetch(source){
-  const res = await fetch(source.url);
+  // Neither adsb.fi nor adsb.lol send Access-Control-Allow-Origin, so a direct
+  // browser fetch is blocked by CORS even though the API itself works fine.
+  // Route through a public CORS relay that adds the missing header.
+  const proxied = `https://api.allorigins.win/raw?url=${encodeURIComponent(source.url)}`;
+  const res = await fetch(proxied);
   if(!res.ok) throw new Error(`${source.name} HTTP ${res.status}`);
   const data = await res.json();
   const list = data.aircraft || data.ac || [];
