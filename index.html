@@ -75,6 +75,12 @@
   .count-pill{
     background:rgba(255,179,71,0.15); color:var(--amber); border-radius:999px; padding:2px 10px; font-size:11px;
   }
+  .filter-toggle{
+    display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--ink-dim);
+    margin-bottom:14px; cursor:pointer; user-select:none;
+  }
+  .filter-toggle input{ accent-color: var(--amber); width:14px; height:14px; cursor:pointer; }
+  .filter-toggle span{ color:var(--amber); }
   table{width:100%; border-collapse:collapse; font-size:12.5px;}
   th{
     text-align:left; font-weight:400; color:var(--ink-dim); text-transform:uppercase; font-size:10.5px;
@@ -161,6 +167,10 @@
         <span>Tracked aircraft</span>
         <span class="count-pill" id="countPill">0 in range</span>
       </div>
+      <label class="filter-toggle">
+        <input type="checkbox" id="approachToggle">
+        Approach / departure only (below <span id="altThresholdLabel"></span> ft)
+      </label>
       <table>
         <thead>
           <tr>
@@ -205,7 +215,7 @@
   </div>
 
   <footer>
-    Data via the free adsb.fi / adsb.lol community ADS-B networks, proxied through a Cloudflare Worker — coverage depends on nearby volunteer receivers and can lag
+    Data via the free OpenSky Network ADS-B feed, proxied through a Cloudflare Worker — coverage depends on nearby volunteer receivers and can lag
     a few seconds behind real time, and not every aircraft broadcasts a callsign. Carrier names are guessed from the ICAO callsign prefix (e.g. DAL → Delta).<br>
     Built for 4380 Fruitville Rd, Sarasota FL. The overhead sighting log is stored in Cloudflare KV.
   </footer>
@@ -368,6 +378,25 @@ function isWatched(carrierCode){
   return carrierCode && WATCHED_CARRIERS.includes(carrierCode);
 }
 
+// Rough cutoff for "this is approach/departure traffic, not cruise overflight"
+// this close to a regional airport. Cruise traffic is typically 25,000+ ft;
+// aircraft climbing out of or descending into SRQ pass through this range.
+const APPROACH_ALT_FT = 5000;
+document.getElementById('altThresholdLabel').textContent = APPROACH_ALT_FT.toLocaleString();
+
+const approachToggle = document.getElementById('approachToggle');
+let approachOnly = false;
+approachToggle.addEventListener('change', () => {
+  approachOnly = approachToggle.checked;
+  renderTable(currentPlanes);
+  drawScope();
+});
+
+function visiblePlanes(planes){
+  if(!approachOnly) return planes;
+  return planes.filter(p => p.altFt != null && p.altFt <= APPROACH_ALT_FT);
+}
+
 const statusText = document.getElementById('statusText');
 const tbody = document.getElementById('tbody');
 const countPill = document.getElementById('countPill');
@@ -424,7 +453,7 @@ function drawScope(){
   ctx.restore();
 
   // planes
-  currentPlanes.forEach(p=>{
+  visiblePlanes(currentPlanes).forEach(p=>{
     const dist = Math.min(p.dist, RADIUS_MI);
     const r = (dist / RADIUS_MI) * R;
     const angleRad = (p.bearing - 90) * Math.PI/180; // bearing 0=N -> rotate so N is up
@@ -453,8 +482,6 @@ const RADIUS_NM = RADIUS_MI / 1.15078;
 // Two independent, key-free, CORS-friendly ADS-B sources, tried in order.
 // Both return ADSBExchange-compatible JSON: { ac: [ {hex, flight, alt_baro, gs, track, lat, lon, ...} ] }
 const SOURCES = [
-  { name:'adsb.fi',  format:'adsbex', url:`https://opendata.adsb.fi/api/v2/lat/${CENTER_LAT}/lon/${CENTER_LON}/dist/${RADIUS_NM.toFixed(1)}` },
-  { name:'adsb.lol', format:'adsbex', url:`https://api.adsb.lol/v2/point/${CENTER_LAT}/${CENTER_LON}/${RADIUS_NM.toFixed(1)}` },
   { name:'opensky',  format:'opensky', url:`https://opensky-network.org/api/states/all?lamin=${BBOX.lamin}&lomin=${BBOX.lomin}&lamax=${BBOX.lamax}&lomax=${BBOX.lomax}` }
 ];
 
@@ -549,7 +576,7 @@ async function fetchTraffic(){
       : '';
     tbody.innerHTML = `<tr class="empty-row"><td colspan="6">
       <span class="big">Can't reach a live flight feed right now</span>
-      ${sandboxNote}adsb.fi, adsb.lol, and OpenSky all failed to respond — this is usually a temporary
+      ${sandboxNote}OpenSky failed to respond — this is usually a temporary
       rate limit or an outage on their end, not a problem with this page. It will keep retrying
       every 20 seconds automatically.
     </td></tr>`;
@@ -563,10 +590,14 @@ function setStatus(ok, text){
   statusText.textContent = text + ' · ' + new Date().toLocaleTimeString();
 }
 
-function renderTable(planes){
-  countPill.textContent = `${planes.length} in range`;
+function renderTable(allPlanes){
+  const planes = visiblePlanes(allPlanes);
+  countPill.textContent = approachOnly ? `${planes.length} approach/departure` : `${planes.length} in range`;
   if(planes.length === 0){
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="6"><span class="big">Clear skies right now</span>No aircraft within ${RADIUS_MI} miles reporting position. Checking again shortly.</td></tr>`;
+    const msg = approachOnly && allPlanes.length > 0
+      ? `Nothing below ${APPROACH_ALT_FT.toLocaleString()} ft right now — ${allPlanes.length} aircraft in range are all at cruise altitude.`
+      : `No aircraft within ${RADIUS_MI} miles reporting position. Checking again shortly.`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="6"><span class="big">Clear skies right now</span>${msg}</td></tr>`;
     return;
   }
   tbody.innerHTML = planes.map(p => `
