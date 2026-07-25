@@ -320,7 +320,7 @@ async function tryFetch(source){
   const res = await fetch(source.url);
   if(!res.ok) throw new Error(`${source.name} HTTP ${res.status}`);
   const data = await res.json();
-  const list = data.ac || [];
+  const list = data.aircraft || data.ac || [];
   return list
     .filter(ac => typeof ac.lat === 'number' && typeof ac.lon === 'number' && ac.alt_baro !== 'ground')
     .map(normalize)
