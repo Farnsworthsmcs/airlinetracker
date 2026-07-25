@@ -453,8 +453,9 @@ const RADIUS_NM = RADIUS_MI / 1.15078;
 // Two independent, key-free, CORS-friendly ADS-B sources, tried in order.
 // Both return ADSBExchange-compatible JSON: { ac: [ {hex, flight, alt_baro, gs, track, lat, lon, ...} ] }
 const SOURCES = [
-  { name:'adsb.fi',  url:`https://opendata.adsb.fi/api/v2/lat/${CENTER_LAT}/lon/${CENTER_LON}/dist/${RADIUS_NM.toFixed(1)}` },
-  { name:'adsb.lol', url:`https://api.adsb.lol/v2/point/${CENTER_LAT}/${CENTER_LON}/${RADIUS_NM.toFixed(1)}` }
+  { name:'adsb.fi',  format:'adsbex', url:`https://opendata.adsb.fi/api/v2/lat/${CENTER_LAT}/lon/${CENTER_LON}/dist/${RADIUS_NM.toFixed(1)}` },
+  { name:'adsb.lol', format:'adsbex', url:`https://api.adsb.lol/v2/point/${CENTER_LAT}/${CENTER_LON}/${RADIUS_NM.toFixed(1)}` },
+  { name:'opensky',  format:'opensky', url:`https://opensky-network.org/api/states/all?lamin=${BBOX.lamin}&lomin=${BBOX.lomin}&lamax=${BBOX.lamax}&lomax=${BBOX.lomax}` }
 ];
 
 let failCount = 0;
@@ -478,13 +479,43 @@ function normalize(ac){
   };
 }
 
+// OpenSky returns positional arrays, not objects — different shape entirely.
+function normalizeOpenSky(state){
+  const [icao24, callsignRaw, , , , lon, lat, baroAlt, onGround, velocity, trueTrack, , geoAlt] = state;
+  const flight = (callsignRaw || '').trim();
+  const dist = haversineMiles(CENTER_LAT, CENTER_LON, lat, lon);
+  const bearing = bearingDeg(CENTER_LAT, CENTER_LON, lat, lon);
+  const carrier = guessCarrier(flight);
+  const altM = geoAlt ?? baroAlt;
+  return {
+    icao24, callsign: flight || icao24,
+    carrierName: carrier ? carrier.name : 'Unknown',
+    carrierCode: carrier ? carrier.code : null,
+    altFt: altM != null ? Math.round(altM * 3.28084) : null,
+    speedMph: velocity != null ? Math.round(velocity * 2.23694) : null,
+    heading: trueTrack != null ? Math.round(trueTrack) : null,
+    dist, bearing, onGround,
+    label: flight || icao24
+  };
+}
+
 async function tryFetch(source){
-  // Neither adsb.fi nor adsb.lol send Access-Control-Allow-Origin, so a direct
-  // browser fetch is blocked by CORS. Route through our own Worker, which adds it.
+  // None of these APIs send Access-Control-Allow-Origin, so a direct browser
+  // fetch is blocked by CORS. Route through our own Worker, which adds it.
   const proxied = `${WORKER_URL}/api/adsb?url=${encodeURIComponent(source.url)}`;
   const res = await fetch(proxied);
   if(!res.ok) throw new Error(`${source.name} HTTP ${res.status}`);
   const data = await res.json();
+
+  if(source.format === 'opensky'){
+    const states = data.states || [];
+    return states
+      .filter(s => s[6] !== null && s[5] !== null && s[8] !== true) // has lat/lon, not on ground
+      .map(normalizeOpenSky)
+      .filter(p => p.dist <= RADIUS_MI)
+      .sort((a,b) => a.dist - b.dist);
+  }
+
   const list = data.aircraft || data.ac || [];
   return list
     .filter(ac => typeof ac.lat === 'number' && typeof ac.lon === 'number' && ac.alt_baro !== 'ground')
@@ -518,7 +549,7 @@ async function fetchTraffic(){
       : '';
     tbody.innerHTML = `<tr class="empty-row"><td colspan="6">
       <span class="big">Can't reach a live flight feed right now</span>
-      ${sandboxNote}Both adsb.fi and adsb.lol failed to respond — this is usually a temporary
+      ${sandboxNote}adsb.fi, adsb.lol, and OpenSky all failed to respond — this is usually a temporary
       rate limit or an outage on their end, not a problem with this page. It will keep retrying
       every 20 seconds automatically.
     </td></tr>`;
